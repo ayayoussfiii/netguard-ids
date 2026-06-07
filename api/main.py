@@ -1,6 +1,6 @@
 
 """
-main.py
+
 ───────
 FastAPI application exposing:
   GET  /alerts          — paginated alert list
