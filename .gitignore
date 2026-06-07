@@ -1,0 +1,37 @@
+# Environment
+.env
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Data — never commit raw BETH CSVs
+data/beth/
+data/cicids/
+
+# Models — large binary files
+ml/models/
+*.pkl
+*.joblib
+*.model
+
+# ChromaDB store
+rag/chroma_store/
+
+# Streamlit cache
+.streamlit/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# OS
+.DS_Store
+Thumbs.db

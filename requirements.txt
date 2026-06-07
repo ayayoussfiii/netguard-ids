@@ -1,0 +1,41 @@
+# Streaming
+kafka-python==2.0.2
+
+# Data
+pandas==2.2.2
+numpy==1.26.4
+scikit-learn==1.4.2
+
+# ML
+xgboost==2.0.3
+shap==0.45.0
+joblib==1.4.2
+optuna==3.6.1
+
+# RAG / LLM
+langchain==0.2.6
+langchain-openai==0.1.13
+langchain-community==0.2.6
+chromadb==0.5.3
+sentence-transformers==3.0.1
+
+# Database
+psycopg2-binary==2.9.9
+pgvector==0.3.0
+sqlalchemy==2.0.30
+
+# API
+fastapi==0.111.0
+uvicorn[standard]==0.30.1
+websockets==12.0
+
+# Dashboard
+streamlit==1.35.0
+plotly==5.22.0
+altair==5.3.0
+
+# Utilities
+python-dotenv==1.0.1
+pydantic==2.7.4
+loguru==0.7.2
+tqdm==4.66.4
