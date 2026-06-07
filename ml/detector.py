@@ -1,5 +1,4 @@
 """
-detector.py
 ───────────
 Loads trained models and exposes a simple inference API
 used by pipeline/consumer.py.
