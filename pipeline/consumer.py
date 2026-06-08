@@ -1,6 +1,6 @@
 """
 
-───────────
+
 Kafka consumer that orchestrates the full NetGuard pipeline:
 
   raw.syscalls  →  feature engineering  →  Isolation Forest
