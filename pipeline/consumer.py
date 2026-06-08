@@ -1,5 +1,5 @@
 """
-consumer.py
+
 ───────────
 Kafka consumer that orchestrates the full NetGuard pipeline:
 
