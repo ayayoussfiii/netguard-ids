@@ -1,7 +1,6 @@
 
 """
 
-──────────
 Downloads and indexes the MITRE ATT&CK Enterprise matrix into ChromaDB.
 Run once before starting the pipeline.
 
