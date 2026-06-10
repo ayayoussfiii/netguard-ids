@@ -1,6 +1,4 @@
 """
-
-─────────────
 Streams BETH dataset rows into Kafka (raw.syscalls) at a configurable rate.
 Simulates real-time eBPF sensor output from the 23 AWS honeypots.
 
