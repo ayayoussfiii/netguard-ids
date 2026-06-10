@@ -1,6 +1,4 @@
 """
-RAG pipeline: retrieves MITRE ATT&CK techniques relevant to an alert,
-then prompts an LLM to generate a structured incident report.
 
 Called asynchronously from pipeline/consumer.py after an alert is published.
 """
