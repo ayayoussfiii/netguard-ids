@@ -1,97 +1,105 @@
+"""
+pipeline.py
+───────────
+RAG pipeline: retrieves MITRE ATT&CK techniques relevant to an alert,
+then prompts an LLM to generate a structured incident report.
 
+Called asynchronously from pipeline/consumer.py after an alert is published.
+"""
+
+from __future__ import annotations
 
 import os
-import json
+from functools import lru_cache
 from typing import Optional
 
 import chromadb
 from chromadb.utils import embedding_functions
-from langchain_openai import ChatOpenAI
-from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_openai import ChatOpenAI
 from loguru import logger
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# ── Configuration ─────────────────────────────────────────────────────────────
 
 CHROMA_DIR      = os.getenv("CHROMA_PERSIST_DIR",  "rag/chroma_store/")
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL",      "sentence-transformers/all-MiniLM-L6-v2")
 COLLECTION_NAME = "mitre_attack"
 TOP_K           = int(os.getenv("RAG_TOP_K",        "5"))
 LLM_PROVIDER    = os.getenv("LLM_PROVIDER",         "openai")
-
+MAX_DOC_CHARS   = int(os.getenv("RAG_MAX_DOC_CHARS", "400"))
+MAX_SHAP_FEATS  = int(os.getenv("RAG_MAX_SHAP_FEATS", "8"))
 
 # ── LLM setup ─────────────────────────────────────────────────────────────────
 
+@lru_cache(maxsize=1)
 def _get_llm():
+    """Instantiate and cache the LLM (once per process)."""
     if LLM_PROVIDER == "openai":
         return ChatOpenAI(
             model="gpt-4o-mini",
-            temperature=0,       # deterministic, auditable reports
+            temperature=0,    # deterministic, auditable reports
             max_tokens=1024,
         )
-    elif LLM_PROVIDER == "ollama":
-        from langchain_community.llms import Ollama
+    if LLM_PROVIDER == "ollama":
+        from langchain_community.llms import Ollama  # optional dependency
         return Ollama(
             base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
             model=os.getenv("OLLAMA_MODEL", "llama3"),
             temperature=0,
         )
-    else:
-        raise ValueError(f"Unknown LLM_PROVIDER: {LLM_PROVIDER}")
+    raise ValueError(
+        f"Unknown LLM_PROVIDER: {LLM_PROVIDER!r}. "
+        "Supported values: 'openai', 'ollama'."
+    )
 
 
 # ── ChromaDB retriever ────────────────────────────────────────────────────────
 
-_client     = None
-_collection = None
-_ef         = None
-
-
+@lru_cache(maxsize=1)
 def _get_collection():
-    global _client, _collection, _ef
-    if _collection is None:
-        _ef = embedding_functions.SentenceTransformerEmbeddingFunction(
-            model_name=EMBEDDING_MODEL
-        )
-        _client     = chromadb.PersistentClient(path=CHROMA_DIR)
-        _collection = _client.get_collection(
-            name=COLLECTION_NAME,
-            embedding_function=_ef,
-        )
-    return _collection
+    """Open (and cache) the ChromaDB collection."""
+    ef = embedding_functions.SentenceTransformerEmbeddingFunction(
+        model_name=EMBEDDING_MODEL
+    )
+    client = chromadb.PersistentClient(path=CHROMA_DIR)
+    return client.get_collection(name=COLLECTION_NAME, embedding_function=ef)
 
 
 def retrieve_techniques(query: str) -> list[dict]:
-    collection = _get_collection()
-    results = collection.query(
+    """Return the top-K MITRE ATT&CK techniques most similar to *query*."""
+    results = _get_collection().query(
         query_texts=[query],
         n_results=TOP_K,
         include=["documents", "distances", "metadatas"],
     )
-    techniques = []
-    for doc, meta, dist in zip(
-        results["documents"][0],
-        results["metadatas"][0],
-        results["distances"][0],
-    ):
-        techniques.append({
-            "document":     doc,
-            "metadata":     meta,
-            "similarity":   round(1 - dist, 4),
-        })
-    return techniques
+    return [
+        {
+            "document":   doc,
+            "metadata":   meta,
+            "similarity": round(1 - dist, 4),
+        }
+        for doc, meta, dist in zip(
+            results["documents"][0],
+            results["metadatas"][0],
+            results["distances"][0],
+        )
+    ]
 
 
-# ── Prompt ────────────────────────────────────────────────────────────────────
+# ── Prompt templates ──────────────────────────────────────────────────────────
 
-SYSTEM_PROMPT = """You are a senior threat analyst. You receive:
+SYSTEM_PROMPT = """\
+You are a senior threat analyst. You receive:
 1. A security alert from a host-based IDS (BETH dataset — real AWS honeypot syscall data)
 2. The top SHAP features that triggered the alert
 3. Relevant MITRE ATT&CK techniques retrieved from a vector database
 
 Your task: produce a structured JSON incident report.
-Respond ONLY with valid JSON — no preamble, no markdown, no explanation.
+Respond ONLY with valid JSON — no preamble, no markdown fences, no explanation.
 
 JSON schema:
 {
@@ -111,16 +119,16 @@ JSON schema:
 }
 """
 
-USER_TEMPLATE = """
+USER_TEMPLATE = """\
 ## Alert
 
-- Host:         {host}
-- Syscall:      {event_name}
-- Process:      {process_name}  (PID {pid})
-- Parent:       {parent_process_name}  (PPID {ppid})
-- IF score:     {if_score}
-- XGB class:    {xgb_label}  (p_evil={p_evil})
-- Timestamp:    {timestamp}
+- Host:      {host}
+- Syscall:   {event_name}
+- Process:   {process_name}  (PID {pid})
+- Parent:    {parent_process_name}  (PPID {ppid})
+- IF score:  {if_score}
+- XGB class: {xgb_label}  (p_evil={p_evil})
+- Timestamp: {timestamp}
 
 ## Top SHAP features (descending importance)
 
@@ -131,39 +139,72 @@ USER_TEMPLATE = """
 {techniques_text}
 """
 
+_PROMPT_CHAIN = (
+    ChatPromptTemplate.from_messages([
+        ("system", SYSTEM_PROMPT),
+        ("human",  "{input}"),
+    ])
+    | None  # placeholder; replaced lazily in generate_report
+    | JsonOutputParser()
+)
+
+
+# ── Formatting helpers ────────────────────────────────────────────────────────
 
 def _build_query(alert: dict) -> str:
-    ev = alert.get("event", {})
+    ev   = alert.get("event", {})
     shap = alert.get("shap_values", {})
     top_features = ", ".join(list(shap.keys())[:5])
     return (
         f"syscall {ev.get('eventName', '')} "
         f"process {ev.get('processName', '')} "
-        f"parent {ev.get('parentProcessName', ev.get('processName', ''))} "
+        f"parent {ev.get('parentProcessName') or ev.get('processName', '')} "
         f"anomalous features: {top_features}"
     )
 
 
 def _format_shap(shap_values: dict) -> str:
     lines = []
-    for feat, val in list(shap_values.items())[:8]:
-        bar = "▓" * int(abs(val) * 20) or "░"
-        sign = "+" if val > 0 else "-"
+    for feat, val in list(shap_values.items())[:MAX_SHAP_FEATS]:
+        bar  = "▓" * max(1, int(abs(val) * 20))
+        sign = "+" if val >= 0 else "-"
         lines.append(f"  {sign}{abs(val):.5f}  {bar}  {feat}")
-    return "\n".join(lines)
+    return "\n".join(lines) if lines else "  (no SHAP values)"
 
 
 def _format_techniques(techniques: list[dict]) -> str:
     blocks = []
     for i, t in enumerate(techniques, 1):
         meta = t["metadata"]
+        snippet = t["document"][:MAX_DOC_CHARS].rstrip()
         blocks.append(
-            f"[{i}] {meta.get('technique_id','')} — {meta.get('name','')}\n"
-            f"    Tactic: {meta.get('tactics','')}\n"
+            f"[{i}] {meta.get('technique_id', 'N/A')} — {meta.get('name', 'N/A')}\n"
+            f"    Tactic:     {meta.get('tactics', 'N/A')}\n"
             f"    Similarity: {t['similarity']:.3f}\n"
-            f"    {t['document'][:400]}..."
+            f"    {snippet}…"
         )
-    return "\n\n".join(blocks)
+    return "\n\n".join(blocks) if blocks else "(no techniques retrieved)"
+
+
+def _build_user_message(alert: dict) -> str:
+    ev    = alert.get("event", {})
+    shap  = alert.get("shap_values", {})
+    proba = alert.get("xgb_proba", {})
+
+    return USER_TEMPLATE.format(
+        host                = ev.get("hostName",          "unknown"),
+        event_name          = ev.get("eventName",         "unknown"),
+        process_name        = ev.get("processName",       "unknown"),
+        pid                 = ev.get("processId",         "?"),
+        parent_process_name = ev.get("parentProcessName") or ev.get("processName", "unknown"),
+        ppid                = ev.get("parentProcessId",   "?"),
+        if_score            = alert.get("if_score",       "?"),
+        xgb_label           = alert.get("xgb_label",     "?"),
+        p_evil              = proba.get("EVIL",           "?"),
+        timestamp           = ev.get("timestamp",         "?"),
+        shap_table          = _format_shap(shap),
+        techniques_text     = _format_techniques(retrieve_techniques(_build_query(alert))),
+    )
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -176,42 +217,23 @@ def generate_report(alert: dict) -> Optional[dict]:
     Returns the parsed report dict, or None on failure.
     """
     try:
-        ev         = alert.get("event", {})
-        shap_vals  = alert.get("shap_values", {})
-        proba      = alert.get("xgb_proba", {})
+        user_msg = _build_user_message(alert)
 
-        query      = _build_query(alert)
-        techniques = retrieve_techniques(query)
-
-        user_msg = USER_TEMPLATE.format(
-            host                = ev.get("hostName",       "unknown"),
-            event_name          = ev.get("eventName",      "unknown"),
-            process_name        = ev.get("processName",    "unknown"),
-            pid                 = ev.get("processId",      "?"),
-            parent_process_name = ev.get("parentProcessName", ev.get("processName", "unknown")),
-            ppid                = ev.get("parentProcessId", "?"),
-            if_score            = alert.get("if_score",    "?"),
-            xgb_label           = alert.get("xgb_label",  "?"),
-            p_evil              = proba.get("EVIL",        "?"),
-            timestamp           = ev.get("timestamp",      "?"),
-            shap_table          = _format_shap(shap_vals),
-            techniques_text     = _format_techniques(techniques),
-        )
-
-        llm    = _get_llm()
         prompt = ChatPromptTemplate.from_messages([
             ("system", SYSTEM_PROMPT),
             ("human",  "{input}"),
         ])
-        chain  = prompt | llm | JsonOutputParser()
+        chain  = prompt | _get_llm() | JsonOutputParser()
         report = chain.invoke({"input": user_msg})
 
         logger.info(
-            f"RAG report generated: {report.get('technique_id')} — "
-            f"{report.get('technique_name')} (confidence={report.get('confidence')})"
+            "RAG report generated: {} — {} (confidence={})",
+            report.get("technique_id"),
+            report.get("technique_name"),
+            report.get("confidence"),
         )
         return report
 
-    except Exception as e:
-        logger.error(f"RAG pipeline failed: {e}")
+    except Exception as exc:
+        logger.exception("RAG pipeline failed: {}", exc)
         return None
