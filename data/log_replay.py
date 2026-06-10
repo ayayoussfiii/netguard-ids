@@ -1,5 +1,4 @@
 """
-Streams BETH dataset rows into Kafka (raw.syscalls) at a configurable rate.
 
 
 Usage:
