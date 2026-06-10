@@ -4,8 +4,6 @@ log_replay.py
 Streams BETH dataset rows into Kafka (raw.syscalls) at a configurable rate.
 Simulates real-time eBPF sensor output from the 23 AWS honeypots.
 
-Usage:
-    python data/log_replay.py [--speed 1000] [--split all] [--dry-run]
 
 Options:
     --speed INT     Events per second (-1 = max throughput). Default: $REPLAY_SPEED or 1000.
