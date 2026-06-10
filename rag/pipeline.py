@@ -1,7 +1,6 @@
 """
 
-Called asynchronously from pipeline/consumer.py after an alert is published.
-"""
+
 
 import os
 import json
