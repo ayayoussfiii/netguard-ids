@@ -1,9 +1,4 @@
-"""
 
-
-
-    python data/log_replay.py [--speed 1000] [--host 0]
-"""
 
 import os
 import json
