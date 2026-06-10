@@ -1,9 +1,4 @@
 
-"""
-
-    python rag/indexer.py
-"""
-
 import os
 import json
 import urllib.request
