@@ -1,7 +1,6 @@
 
 """
 
-Run once before starting the pipeline.
     python rag/indexer.py
 """
 
