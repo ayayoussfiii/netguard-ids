@@ -1,5 +1,5 @@
 """
-pipeline.py
+
 ───────────
 RAG pipeline: retrieves MITRE ATT&CK techniques relevant to an alert,
 then prompts an LLM to generate a structured incident report.
