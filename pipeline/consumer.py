@@ -1,120 +1,133 @@
+name: CI
 
-"""
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
 
+jobs:
+  # ── 1. Lint & type-check ───────────────────────────────────────────────────
+  lint:
+    name: Lint & Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
-Kafka consumer that orchestrates the full NetGuard pipeline:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
 
-  raw.syscalls  →  feature engineering  →  Isolation Forest
-               →  XGBoost (if anomalous)  →  SHAP
-               →  alerts.output  →  async RAG report
-"""
+      - name: Install lint deps
+        run: pip install ruff mypy pydantic
 
-import os
-import json
-import asyncio
-import threading
-from concurrent.futures import ThreadPoolExecutor
+      - name: ruff (lint + format check)
+        run: |
+          ruff check .
+          ruff format --check .
 
-from kafka import KafkaConsumer, KafkaProducer
-from loguru import logger
-from dotenv import load_dotenv
+      - name: mypy (pipeline/consumer.py)
+        run: mypy pipeline/consumer.py pipeline/metrics.py --ignore-missing-imports
 
-from pipeline.features import extract, update_if_score, FEATURE_NAMES
-from ml.detector import Detector
-from rag.pipeline import generate_report
+  # ── 2. Unit tests ─────────────────────────────────────────────────────────
+  test:
+    name: Unit Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
 
-load_dotenv()
+    steps:
+      - uses: actions/checkout@v4
 
-KAFKA_BROKER   = os.getenv("KAFKA_BROKER",        "localhost:9092")
-TOPIC_IN       = os.getenv("KAFKA_TOPIC_INPUT",   "raw.syscalls")
-TOPIC_OUT      = os.getenv("KAFKA_TOPIC_OUTPUT",  "alerts.output")
-GROUP_ID       = os.getenv("KAFKA_GROUP_ID",      "netguard-consumer")
-THRESHOLD      = float(os.getenv("ANOMALY_THRESHOLD", "-0.05"))
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
 
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-cov pytest-mock
 
-def build_consumer() -> KafkaConsumer:
-    return KafkaConsumer(
-        TOPIC_IN,
-        bootstrap_servers=KAFKA_BROKER,
-        group_id=GROUP_ID,
-        value_deserializer=lambda m: json.loads(m.decode("utf-8")),
-        auto_offset_reset="earliest",
-        enable_auto_commit=True,
-    )
+      - name: Run tests with coverage
+        run: |
+          pytest tests/test_consumer.py -v \
+            --cov=pipeline/consumer \
+            --cov-report=xml \
+            --cov-report=term-missing \
+            --cov-fail-under=80
 
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          file: coverage.xml
+          fail_ci_if_error: false
 
-def build_producer() -> KafkaProducer:
-    return KafkaProducer(
-        bootstrap_servers=KAFKA_BROKER,
-        value_serializer=lambda v: json.dumps(v).encode("utf-8"),
-    )
+  # ── 3. Integration test (Kafka via docker-compose) ─────────────────────────
+  integration:
+    name: Integration Test
+    runs-on: ubuntu-latest
+    needs: test      # only run after unit tests pass
 
+    services:
+      zookeeper:
+        image: confluentinc/cp-zookeeper:7.6.0
+        env:
+          ZOOKEEPER_CLIENT_PORT: 2181
+        ports: ["2181:2181"]
 
-def publish_alert(producer: KafkaProducer, alert: dict):
-    producer.send(TOPIC_OUT, value=alert)
+      kafka:
+        image: confluentinc/cp-kafka:7.6.0
+        env:
+          KAFKA_BROKER_ID: 1
+          KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+          KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+          KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+          KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+        ports: ["9092:9092"]
 
+    steps:
+      - uses: actions/checkout@v4
 
-def run(max_workers: int = 4):
-    detector  = Detector()
-    consumer  = build_consumer()
-    producer  = build_producer()
-    executor  = ThreadPoolExecutor(max_workers=max_workers)
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
 
-    logger.info(f"Consumer ready — listening on [{TOPIC_IN}]")
+      - name: Install dependencies
+        run: pip install -r requirements.txt pytest
 
-    for msg in consumer:
-        raw_event = msg.value
+      - name: Wait for Kafka to be ready
+        run: |
+          for i in $(seq 1 30); do
+            nc -z localhost 9092 && echo "Kafka ready" && break
+            echo "Waiting for Kafka... ($i/30)"
+            sleep 2
+          done
 
-        # 1 — Feature engineering
-        event = extract(raw_event)
+      - name: Run integration tests
+        env:
+          KAFKA_BROKER: localhost:9092
+        run: pytest tests/test_integration.py -v -m integration
 
-        # 2 — Isolation Forest anomaly score
-        X = [[event[f] for f in FEATURE_NAMES]]
-        if_score = detector.anomaly_score(X)[0]
+  # ── 4. Docker build (smoke test) ──────────────────────────────────────────
+  docker:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    needs: test
 
-        # Update per-process IF score for parent propagation
-        update_if_score(
-            host=event.get("hostName", ""),
-            pid=int(event.get("processId", 0)),
-            if_score=if_score,
-            ts=float(event.get("timestamp", 0)),
-        )
+    steps:
+      - uses: actions/checkout@v4
 
-        # 3 — Skip if score is below threshold (normal traffic)
-        if if_score > THRESHOLD:
-            continue
+      - name: Build consumer image
+        run: docker build -t netguard-consumer:ci -f Dockerfile.consumer .
 
-        # 4 — XGBoost classification
-        proba  = detector.classify(X)[0]    # [p_benign, p_sus, p_evil]
-        label  = int(proba.argmax())
-        labels = ["benign", "SUS", "EVIL"]
-
-        if label == 0:
-            continue   # classified as benign — skip
-
-        # 5 — SHAP per-event explanation
-        shap_vals = detector.explain(X)[0]   # dict {feature: contribution}
-
-        alert = {
-            "event":       event,
-            "if_score":    round(if_score, 4),
-            "xgb_class":   label,
-            "xgb_label":   labels[label],
-            "xgb_proba":   {labels[i]: round(float(p), 4) for i, p in enumerate(proba)},
-            "shap_values": shap_vals,
-        }
-
-        # 6 — Publish alert immediately (dashboard receives it via WebSocket)
-        publish_alert(producer, alert)
-        logger.warning(
-            f"ALERT [{labels[label]}] — host={event.get('hostName')} "
-            f"pid={event.get('processId')} syscall={event.get('eventName')} "
-            f"IF={if_score:.3f} p_evil={proba[2]:.3f}"
-        )
-
-        # 7 — Async RAG report (non-blocking)
-        executor.submit(generate_report, alert)
-
-
-if __name__ == "__main__":
-    run()
+      - name: Smoke-test image starts
+        run: |
+          docker run --rm \
+            -e KAFKA_BROKER=localhost:9092 \
+            --entrypoint python \
+            netguard-consumer:ci \
+            -c "from pipeline.consumer import process_message; print('import OK')"
