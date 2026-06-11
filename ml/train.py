@@ -1,6 +1,4 @@
 """
-
-────────
 Trains NetGuard's ML stack on the BETH dataset:
 
   1. Isolation Forest  — trained on benign-only events (training split)
