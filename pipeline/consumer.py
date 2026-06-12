@@ -3,8 +3,7 @@ raw.syscalls → feature engineering → Isolation Forest
              → XGBoost (if anomalous) → SHAP
              → alerts.output → async RAG report
 
-Fixes vs original:
-  1. Pydantic schema validation     — no more silent KeyError on raw_event
+
   2. try/except per message         — one bad event never crashes the loop
   3. Graceful shutdown (SIGINT/TERM) — producer flushed, executor drained
   4. acks="all" + flush() + future.result() — no lost alerts
