@@ -2,7 +2,7 @@
 raw.syscalls → feature engineering → Isolation Forest
              → XGBoost (if anomalous) → SHAP
              → alerts.output → async RAG report
-  6. process_message() pure fn      — fully unit-testable without Kafka
+
   7. Structured logging             — key=value instead of f-string soup
   8. Removed unused imports         — asyncio, threading were never used
 """
