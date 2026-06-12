@@ -1,6 +1,4 @@
 """
-
-
 raw.syscalls → feature engineering → Isolation Forest
              → XGBoost (if anomalous) → SHAP
              → alerts.output → async RAG report
