@@ -797,7 +797,6 @@ REPLAY_SPEED=1000
 - [ ] CI/CD (GitHub Actions)
 
 
-- MITRE ATT&CK Enterprise Matrix — [attack.mitre.org](https://attack.mitre.org)
 - Kaggle dataset — [katehighnam/beth-dataset](https://www.kaggle.com/datasets/katehighnam/beth-dataset)
 
 ---
