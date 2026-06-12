@@ -1,5 +1,5 @@
 """
-Kafka consumer — NetGuard pipeline orchestrator.
+
 
 raw.syscalls → feature engineering → Isolation Forest
              → XGBoost (if anomalous) → SHAP
