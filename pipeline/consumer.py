@@ -3,8 +3,7 @@ raw.syscalls → feature engineering → Isolation Forest
              → XGBoost (if anomalous) → SHAP
              → alerts.output → async RAG report
 
-  7. Structured logging             — key=value instead of f-string soup
-  8. Removed unused imports         — asyncio, threading were never used
+ 
 """
 
 from __future__ import annotations
