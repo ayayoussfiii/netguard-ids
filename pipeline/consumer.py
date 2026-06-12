@@ -5,7 +5,7 @@ raw.syscalls → feature engineering → Isolation Forest
 
 
 
-  3. Graceful shutdown (SIGINT/TERM) — producer flushed, executor drained
+
   4. acks="all" + flush() + future.result() — no lost alerts
   5. Prometheus metrics             — counters & histograms per stage
   6. process_message() pure fn      — fully unit-testable without Kafka
