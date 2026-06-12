@@ -4,7 +4,7 @@ raw.syscalls → feature engineering → Isolation Forest
              → alerts.output → async RAG report
 
 
-  2. try/except per message         — one bad event never crashes the loop
+
   3. Graceful shutdown (SIGINT/TERM) — producer flushed, executor drained
   4. acks="all" + flush() + future.result() — no lost alerts
   5. Prometheus metrics             — counters & histograms per stage
