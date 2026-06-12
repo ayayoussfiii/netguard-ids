@@ -797,7 +797,6 @@ REPLAY_SPEED=1000
 - [ ] CI/CD (GitHub Actions)
 
 
-- Highnam et al. — *BETH Dataset: Real Cybersecurity Data for Unsupervised Anomaly Detection Research*, CAMLIS 2021 — [paper](https://ceur-ws.org/Vol-3095/paper1.pdf)
 - MITRE ATT&CK Enterprise Matrix — [attack.mitre.org](https://attack.mitre.org)
 - Kaggle dataset — [katehighnam/beth-dataset](https://www.kaggle.com/datasets/katehighnam/beth-dataset)
 
