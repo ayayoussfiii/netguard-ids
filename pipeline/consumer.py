@@ -2,7 +2,6 @@
 raw.syscalls → feature engineering → Isolation Forest
              → XGBoost (if anomalous) → SHAP
              → alerts.output → async RAG report
-
   4. acks="all" + flush() + future.result() — no lost alerts
   5. Prometheus metrics             — counters & histograms per stage
   6. process_message() pure fn      — fully unit-testable without Kafka
