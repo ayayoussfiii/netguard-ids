@@ -806,6 +806,4 @@ REPLAY_SPEED=1000
 
 ---
 
-## License
 
-MIT
