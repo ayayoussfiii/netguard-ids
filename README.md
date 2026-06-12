@@ -797,7 +797,3 @@ REPLAY_SPEED=1000
 - [ ] CI/CD (GitHub Actions)
 
 
-- Kaggle dataset — [katehighnam/beth-dataset](https://www.kaggle.com/datasets/katehighnam/beth-dataset)
-
-
-
