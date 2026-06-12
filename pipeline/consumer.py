@@ -2,8 +2,6 @@
 raw.syscalls → feature engineering → Isolation Forest
              → XGBoost (if anomalous) → SHAP
              → alerts.output → async RAG report
-
- 
 """
 
 from __future__ import annotations
